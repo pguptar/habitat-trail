@@ -1,0 +1,9 @@
+{
+  "name": "habitat-trail-photo-map",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Habitat Trail: photo ID and safe neighborhood-level photo pins on a real map",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
