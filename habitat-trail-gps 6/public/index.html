@@ -135,6 +135,9 @@ label.chk input{width:22px;height:22px;margin:0;flex:none;accent-color:var(--gol
 .live .card b{display:block;font-family:var(--display);font-size:19px}
 .live .card small{color:var(--muted);font-weight:700}
 .live .card .go{margin-left:auto;background:var(--gold);color:#1b1505;border-radius:12px;padding:8px 10px;font-weight:800;font-size:13px;flex:none}
+.live .kinds{position:absolute;left:12px;right:12px;top:calc(max(12px,env(safe-area-inset-top)) + 54px);display:flex;flex-wrap:wrap;gap:6px}
+.live .kinds button{border:1px solid var(--line);background:rgba(17,20,15,.8);color:var(--text);border-radius:999px;padding:7px 12px;font-weight:800;font-size:13px;min-height:36px}
+.live .kinds button[aria-pressed="true"]{background:var(--gold);color:#1b1505;border-color:var(--gold)}
 .live .gal{position:absolute;left:16px;bottom:calc(40px + env(safe-area-inset-bottom));background:rgba(17,20,15,.8);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:9px 13px;font-weight:800;font-size:13px;cursor:pointer}
 .live .shutter{position:absolute;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);width:72px;height:72px;border-radius:50%;border:5px solid #fff;background:rgba(255,255,255,.25)}
 .live .conf{display:block;height:5px;border-radius:5px;background:var(--line);margin-top:6px;overflow:hidden;max-width:150px}
@@ -205,6 +208,7 @@ label.chk input{width:22px;height:22px;margin:0;flex:none;accent-color:var(--gol
     <video id="liveVideo" playsinline muted autoplay></video>
     <div class="frame" aria-hidden="true"></div>
     <div class="top"><span class="status" id="liveStatus" role="status" aria-live="polite">Starting camera</span><button class="x" id="liveClose" aria-label="Close live camera">&times;</button></div>
+    <div class="kinds" id="liveKinds" role="group" aria-label="What are you scanning?"><button data-k="" aria-pressed="true">Auto</button><button data-k="plants" aria-pressed="false">🌿 Plant</button><button data-k="birds" aria-pressed="false">🐦 Bird</button><button data-k="insects" aria-pressed="false">🦋 Bug</button></div>
     <button class="card" id="liveCard" aria-live="polite"></button>
     <p class="hintl" id="liveHint">Move the camera around. Names pop up as it sees plants, birds and insects.</p>
     <button class="shutter" id="liveShutter" aria-label="Take a photo"></button>
@@ -442,7 +446,8 @@ function finishId(d,im){
    Claude is only asked when the player taps, to confirm the species and fill in the full Dex card.
    If the phone AI models are missing, the camera falls back to asking Claude when the player holds still. */
 var LV={on:false,stream:null,timer:null,busy:false,prev:null,sent:null,still:0,last:0,calls:0,pauseUntil:0,res:null,mode:'phone',streak:0,lastSci:'',shown:null,unsureSince:0};
-var LIVE_MAX_CALLS=60, PHONE_MIN_SCORE=.35;
+var LIVE_MAX_CALLS=60, PHONE_MIN_SCORE=.45, PHONE_MIN_SCORE_ONE=.3;
+var liveKind='';try{liveKind=localStorage.getItem('ht-live-kind')||''}catch(e){}
 function lvStatus(t,bad){if(!bad&&Date.now()<(LV.holdMsg||0))return;var e=$('#liveStatus');e.textContent=t;e.className='status'+(bad?' bad':'');if(bad)LV.holdMsg=Date.now()+3500}
 function lvSig(v){var c=lvSig.c||(lvSig.c=document.createElement('canvas'));c.width=32;c.height=24;var x=c.getContext('2d',{willReadFrequently:true});x.drawImage(v,0,0,32,24);var d=x.getImageData(0,0,32,24).data,a=new Uint8Array(768);for(var i=0;i<768;i++)a[i]=(d[i*4]*3+d[i*4+1]*6+d[i*4+2])/10;return a}
 function lvDiff(a,b){var t=0;for(var i=0;i<a.length;i++)t+=Math.abs(a[i]-b[i]);return t/a.length}
@@ -453,6 +458,7 @@ async function openLive(){
   var models=[];
   try{if(window.HTScanner)models=await HTScanner.load()}catch(e){models=[]}
   LV.mode=models.length?'phone':'cloud';
+  $('#liveKinds').style.display=LV.mode==='phone'?'flex':'none';
   try{
     LV.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
   }catch(e){lvStatus(e&&e.name==='NotAllowedError'?'Camera is blocked. Allow it in your phone settings.':'The camera could not start.',true);return}
@@ -472,9 +478,9 @@ function phoneLoop(){
   if(!LV.on)return;
   var v=$('#liveVideo');
   if(!document.hidden&&!LV.busy&&v.readyState>=2&&v.videoWidth){
-    try{HTScanner.classify(v)}catch(e){}
-    var b=HTScanner.best(1200);
-    if(b&&b.score>=PHONE_MIN_SCORE&&b.sci){
+    try{HTScanner.classify(v,liveKind)}catch(e){}
+    var b=HTScanner.best(1200,liveKind);
+    if(b&&b.score>=(liveKind?PHONE_MIN_SCORE_ONE:PHONE_MIN_SCORE)&&b.sci){
       LV.streak=b.sci===LV.lastSci?LV.streak+1:1;LV.lastSci=b.sci;
       if(LV.streak>=2){LV.unsureSince=Date.now();if(!LV.shown||LV.shown.sci!==b.sci||Math.abs(LV.shown.score-b.score)>.08){LV.shown=b;showPhoneCard(b)}lvStatus('Found it!')}
     }else{
@@ -537,6 +543,9 @@ function showLiveCard(d){
   $('#liveCard').innerHTML='<span class="e" aria-hidden="true">'+(window.GROUPS&&GROUPS[g]?GROUPS[g][1]:'?')+'</span><span><b>'+esc(en?en.name:d.name)+'</b>'+(window.rarTag?rarTag(rr)+' ':'')+'<small>'+(have?'In your Dex':(en?'New card!':'New to the Dex!'))+'</small></span><span class="go">See everything</span>';
   $('#liveCard').classList.add('on');
 }
+function renderKinds(){Array.prototype.forEach.call($('#liveKinds').children,function(c){c.setAttribute('aria-pressed',String(c.dataset.k===liveKind))})}
+renderKinds();
+$('#liveKinds').addEventListener('click',function(e){var b=e.target.closest('[data-k]');if(!b)return;liveKind=b.dataset.k;try{localStorage.setItem('ht-live-kind',liveKind)}catch(x){}renderKinds();LV.shown=null;LV.streak=0;$('#liveCard').classList.remove('on')});
 $('#liveBtn').addEventListener('click',openLive);
 $('#liveClose').addEventListener('click',closeLive);
 $('#liveCard').addEventListener('click',function(){
