@@ -46,9 +46,12 @@ window.HTScanner = (function () {
   }
 
   /* Runs one model per call (they take turns) and returns that model's best guess. */
-  function classify(source) {
+  /* only: 'plants', 'birds' or 'insects' to use one brain, or empty for all three taking turns */
+  function classify(source, only) {
     if (!loaded.length) return null;
-    var m = loaded[turn++ % loaded.length];
+    var pool = only ? loaded.filter(function (x) { return x.id === only; }) : loaded;
+    if (!pool.length) return null;
+    var m = pool[turn++ % pool.length];
     var scores = tf.tidy(function () {
       var img = tf.browser.fromPixels(source);
       var h = img.shape[0], w = img.shape[1], s = Math.min(h, w);
@@ -62,21 +65,24 @@ window.HTScanner = (function () {
     var d = scores.dataSync(); scores.dispose();
     var max = 0;
     for (var i = 0; i < d.length; i++) if (d[i] > max) max = d[i];
-    var scale = max > 1.5 ? 255 : 1, best = -1, bs = -1;
+    var scale = max > 1.5 ? 255 : 1, best = -1, bs = -1, bg = 0;
     for (var j = 0; j < d.length; j++) {
       var name = m.labels[j];
-      if (!name || /^background$/i.test(name)) continue;
+      if (!name) continue;
+      if (/^background$/i.test(name)) { bg = d[j]; continue; }
       if (d[j] > bs) { bs = d[j]; best = j; }
     }
-    var r = { model: m.id, g: m.g, sci: best >= 0 ? m.labels[best] : '', score: bs / scale, t: Date.now() };
+    /* Each brain has a "background" answer meaning "this isn't my kind of thing".
+       If that beats its best species, the brain stays quiet. */
+    var r = { model: m.id, g: m.g, sci: best >= 0 && bs > bg ? m.labels[best] : '', score: best >= 0 && bs > bg ? bs / scale : 0, bg: bg / scale, t: Date.now() };
     latest[m.id] = r;
     return r;
   }
 
   /* Best recent guess across all models. */
-  function best(maxAgeMs) {
+  function best(maxAgeMs, only) {
     var now = Date.now(), b = null;
-    for (var k in latest) { var r = latest[k]; if (now - r.t <= maxAgeMs && (!b || r.score > b.score)) b = r; }
+    for (var k in latest) { var r = latest[k]; if (only && k !== only) continue; if (r.sci && now - r.t <= maxAgeMs && (!b || r.score > b.score)) b = r; }
     return b;
   }
 
